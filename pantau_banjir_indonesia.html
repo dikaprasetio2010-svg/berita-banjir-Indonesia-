@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PantauBanjir ID - Portal Informasi Banjir Indonesia</title>
+    <!-- Tailwind CSS for modern responsive styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS for interactive mapping -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- FontAwesome for clean iconography -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+        /* Custom Leaflet overrides */
+        #map {
+            height: 480px;
+            z-index: 10;
+        }
+        /* Pulse Animation for active flood markers */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.6); opacity: 0; }
+            50% { opacity: 0.5; }
+            100% { transform: scale(1.6); opacity: 0; }
+        }
+        .pulse-marker-critical {
+            position: relative;
+        }
+        .pulse-marker-critical::after {
+            content: '';
+            position: absolute;
+            width: 32px;
+            height: 32px;
+            background-color: #ef4444;
+            border-radius: 50%;
+            left: -10px;
+            top: -10px;
+            animation: pulse-ring 1.5s cubic-bezier(0.215, 0.610, 0.355, 1) infinite;
+        }
+        .pulse-marker-warning {
+            position: relative;
+        }
+        .pulse-marker-warning::after {
+            content: '';
+            position: absolute;
+            width: 32px;
+            height: 32px;
+            background-color: #f97316;
+            border-radius: 50%;
+            left: -10px;
+            top: -10px;
+            animation: pulse-ring 1.8s cubic-bezier(0.215, 0.610, 0.355, 1) infinite;
+        }
+        /* Hide scrollbars for slick look */
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+
+    <!-- Navigation Header -->
+    <header class="bg-blue-700 text-white shadow-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="bg-white text-blue-700 p-2.5 rounded-xl shadow-inner flex items-center justify-center">
+                    <i class="fa-solid fa-house-flood-water text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl sm:text-2xl font-extrabold tracking-tight">PantauBanjir ID</h1>
+                    <p class="text-xs text-blue-200">Sistem Informasi, Pemetaan & Tanggap Darurat Banjir Nasional</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-600/50 border border-blue-400 text-white">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Sistem Berjalan Lancar
+                </span>
+                <span class="text-xs opacity-80" id="current-datetime"></span>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow max-w-7xl w-full mx-auto p-4 space-y-6">
+        <!-- Notification Box -->
+        <div id="app-notification" class="hidden transition-all duration-300 transform scale-95 opacity-0 bg-emerald-100 border-l-4 border-emerald-500 text-emerald-800 p-4 rounded-r-xl shadow-sm flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <i class="fa-solid fa-circle-check text-xl"></i>
+                <span id="notification-message" class="text-sm font-medium"></span>
+            </div>
+            <button onclick="closeNotification()" class="text-emerald-600 hover:text-emerald-800"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <!-- Quick Statistics Summary cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">Titik Banjir Aktif</p>
+                    <h3 class="text-2xl sm:text-3xl font-bold mt-1 text-slate-800" id="stat-active-floods">0</h3>
+                </div>
+                <div class="p-3 bg-red-50 text-red-600 rounded-xl">
+                    <i class="fa-solid fa-triangle-exclamation text-xl sm:text-2xl"></i>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">Tinggi Air Tertinggi</p>
+                    <h3 class="text-2xl sm:text-3xl font-bold mt-1 text-slate-800" id="stat-max-water">0 <span class="text-sm font-normal text-slate-500">cm</span></h3>
+                </div>
+                <div class="p-3 bg-blue-50 text-blue-600 rounded-xl">
+                    <i class="fa-solid fa-droplet text-xl sm:text-2xl"></i>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">Daerah Sangat Rawan</p>
+                    <h3 class="text-2xl sm:text-3xl font-bold mt-1 text-slate-800" id="stat-critical-zones">0</h3>
+                </div>
+                <div class="p-3 bg-amber-50 text-amber-600 rounded-xl">
+                    <i class="fa-solid fa-circle-exclamation text-xl sm:text-2xl"></i>
+                </div>
+            </div>
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">Update Terakhir</p>
+                    <h3 class="text-lg sm:text-xl font-bold mt-2 text-slate-800 leading-tight" id="stat-last-update">Hari Ini</h3>
+                </div>
+                <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+                    <i class="fa-solid fa-clock-rotate-left text-xl sm:text-2xl"></i>
+                </div>
+            </div>
+        </div>
+
+        <!-- Interactive Section: Map & Selected Detail Info -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Leaflet Map Container -->
+            <div class="lg:col-span-2 space-y-4">
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col h-full">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-3 gap-2 border-b border-slate-100">
+                        <div>
+                            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                <i class="fa-solid fa-map-location-dot text-blue-600"></i> Peta Sebaran Banjir Interaktif
+                            </h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Tekan ikon penanda pada peta atau klik tombol "Atur Titik Baru" untuk menambahkan.</p>
+                        </div>
+                        <div class="flex gap-2 w-full sm:w-auto">
+                            <button onclick="toggleAddMode()" id="btn-add-mode" class="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-1.5 shadow-sm">
+                                <i class="fa-solid fa-location-crosshairs text-sm"></i>
+                                <span id="add-mode-text">Atur Titik Baru</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- The Map itself -->
+                    <div id="map" class="rounded-xl mt-3 flex-grow shadow-inner border border-slate-200"></div>
+                    <div class="mt-2 text-center text-[11px] text-slate-400">
+                        <i class="fa-solid fa-circle-info mr-1"></i> Klik area mana saja di peta saat moda "Atur Titik Baru" aktif untuk mengambil titik koordinat otomatis.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detail Panel of Selected Region -->
+            <div class="space-y-4">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col h-full">
+                    <div class="bg-slate-900 text-white p-4 flex justify-between items-center">
+                        <span class="text-xs font-bold tracking-widest uppercase text-blue-400">Detail Wilayah Terpilih</span>
+                        <div class="flex gap-1">
+                            <span id="badge-prone-risk" class="text-[10px] font-bold px-2 py-1 rounded bg-red-500 text-white">RAWAN</span>
+                        </div>
+                    </div>
+                    
+                    <div class="p-5 flex-grow space-y-5" id="detail-empty-state">
+                        <!-- Default placeholder state when no region is selected -->
+                        <div class="text-center py-16 flex flex-col items-center justify-center space-y-4 text-slate-400">
+                            <i class="fa-solid fa-location-dot text-5xl text-slate-300 animate-bounce"></i>
+                            <div>
+                                <p class="font-bold text-slate-600">Belum Ada Wilayah Terpilih</p>
+                                <p class="text-xs mt-1 px-4">Pilih wilayah dari daftar tabel di bawah atau klik penanda merah di peta untuk melihat informasi lengkap.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Main Detail Information (Dynamic Filled) -->
+                    <div class="p-5 flex-grow space-y-5 hidden" id="detail-content">
+                        <div>
+                            <span class="text-xs text-slate-400 block font-medium uppercase tracking-wider">Nama Daerah / Wilayah</span>
+                            <h3 class="text-xl font-extrabold text-slate-800 mt-1" id="det-region-name">Dayeuhkolot, Bandung</h3>
+                            <p class="text-xs text-slate-400 mt-1 flex items-center gap-1">
+                                <i class="fa-solid fa-compass"></i> Koordinat: <span id="det-coords">0.00, 0.00</span>
+                            </p>
+                        </div>
+
+                        <!-- Water level gauge visualizer -->
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                            <div class="flex justify-between items-center">
+                                <span class="text-xs font-semibold text-slate-500">Ketinggian Air</span>
+                                <span class="text-xl font-black text-blue-700" id="det-water-level">150 cm</span>
+                            </div>
+                            <div class="w-full bg-slate-200 rounded-full h-3.5 mt-2.5 overflow-hidden">
+                                <div id="det-water-bar" class="bg-blue-500 h-full rounded-full transition-all duration-1000 ease-out" style="width: 50%;"></div>
+                            </div>
+                            <div class="flex justify-between items-center text-[10px] text-slate-400 mt-1.5">
+                                <span>Aman (0 cm)</span>
+                                <span>Waspada (100 cm)</span>
+                                <span>Bahaya (>200 cm)</span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                <span class="text-[11px] text-slate-400 block uppercase font-medium">Tanggal Banjir Naik</span>
+                                <span class="text-sm font-bold text-slate-700 mt-1 block flex items-center gap-1">
+                                    <i class="fa-regular fa-calendar-days text-blue-500 text-xs"></i>
+                                    <span id="det-date">28 Mei 2026</span>
+                                </span>
+                            </div>
+                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                <span class="text-[11px] text-slate-400 block uppercase font-medium">Status Kerawanan</span>
+                                <span class="text-sm font-bold mt-1 block flex items-center gap-1" id="det-prone-text">
+                                    <i class="fa-solid fa-circle-exclamation text-xs"></i>
+                                    <span>Sangat Rawan</span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <span class="text-xs text-slate-400 block font-medium uppercase tracking-wider">Penyebab Banjir</span>
+                            <div class="mt-1.5 p-3.5 bg-amber-50 border border-amber-100 text-slate-700 text-xs sm:text-sm rounded-xl leading-relaxed flex items-start gap-2.5">
+                                <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 shrink-0"></i>
+                                <p id="det-cause">Curah hujan di hulu sungai Citarum tinggi memicu luapan sungai.</p>
+                            </div>
+                        </div>
+
+                        <!-- Emergency Recommendations -->
+                        <div class="border-t border-slate-100 pt-4">
+                            <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
+                                <i class="fa-solid fa-kit-medical text-red-500"></i> Rekomendasi Aksi Cepat
+                            </h4>
+                            <p class="text-xs text-slate-600 mt-2 leading-relaxed" id="det-recommendation">
+                                Gunakan jaket penyelamat, segera amankan barang elektronik ke tempat yang tinggi, siapkan tas siaga bencana dan hubungi posko pengungsian terdekat jika air terus naik.
+                            </p>
+                        </div>
+
+                        <!-- Action buttons inside detailed panel -->
+                        <div class="flex gap-2 pt-2">
+                            <button onclick="shareSelectedInfo()" class="flex-1 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5">
+                                <i class="fa-solid fa-share-nodes"></i> Bagikan Info
+                            </button>
+                            <button onclick="editSelectedInForm()" class="flex-1 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 border border-blue-100">
+                                <i class="fa-solid fa-pen-to-square"></i> Sunting Data
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabular & Form Section: Interactive Table & Settings -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Table listing the regions in Indonesia -->
+            <div class="lg:col-span-2 space-y-4">
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-slate-100 gap-3">
+                        <div>
+                            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                <i class="fa-solid fa-list-check text-blue-600"></i> Tabel Daftar Wilayah Terdampak
+                            </h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Tekan salah satu wilayah pada tabel untuk melihat detail di peta dan panel informasi.</p>
+                        </div>
+                        <div class="relative w-full sm:w-64">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                            <input type="text" id="search-input" onkeyup="filterTable()" placeholder="Cari nama daerah..." class="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+                        </div>
+                    </div>
+
+                    <!-- Risk Filter Buttons -->
+                    <div class="flex flex-wrap gap-2 py-3.5 border-b border-slate-100 text-xs">
+                        <span class="text-slate-400 self-center mr-1">Filter Kerawanan:</span>
+                        <button onclick="setFilter('SEMUA')" class="filter-btn active-filter px-3 py-1.5 bg-blue-100 text-blue-700 font-semibold rounded-lg hover:bg-blue-200 transition">Semua</button>
+                        <button onclick="setFilter('SANGAT RAWAN')" class="filter-btn px-3 py-1.5 bg-slate-100 text-slate-600 font-semibold rounded-lg hover:bg-slate-200 transition">Sangat Rawan</button>
+                        <button onclick="setFilter('RAWAN')" class="filter-btn px-3 py-1.5 bg-slate-100 text-slate-600 font-semibold rounded-lg hover:bg-slate-200 transition">Rawan</button>
+                        <button onclick="setFilter('SEDANG')" class="filter-btn px-3 py-1.5 bg-slate-100 text-slate-600 font-semibold rounded-lg hover:bg-slate-200 transition">Sedang</button>
+                    </div>
+
+                    <!-- Responsive Table wrapper -->
+                    <div class="overflow-x-auto mt-4 scrollbar-hide">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b border-slate-100 text-xs text-slate-400 uppercase tracking-wider">
+                                    <th class="py-3 px-4 font-semibold">Wilayah</th>
+                                    <th class="py-3 px-4 font-semibold">Tinggi Air</th>
+                                    <th class="py-3 px-4 font-semibold">Tanggal Naik</th>
+                                    <th class="py-3 px-4 font-semibold">Penyebab Utama</th>
+                                    <th class="py-3 px-4 font-semibold">Kerawanan</th>
+                                </tr>
+                            </thead>
+                            <tbody id="regions-table-body" class="divide-y divide-slate-100 text-xs">
+                                <!-- Dynamic JS injection of table rows -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form to Configure, Add or Edit Flood Region -->
+            <div class="space-y-4">
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between h-full">
+                    <div>
+                        <div class="pb-3 border-b border-slate-100">
+                            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                <i class="fa-solid fa-pen-to-square text-blue-600"></i> Atur & Input Data Banjir
+                            </h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Tambah lokasi baru atau perbarui informasi daerah banjir.</p>
+                        </div>
+
+                        <!-- Add/Edit form -->
+                        <form id="flood-form" onsubmit="handleFormSubmit(event)" class="space-y-4 mt-4">
+                            <input type="hidden" id="form-region-id" value="">
+                            
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Nama Daerah</label>
+                                <input type="text" id="form-region-name" required placeholder="Contoh: Kec. Kaligawe, Semarang" class="w-full p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Ketinggian Air (cm)</label>
+                                    <input type="number" id="form-water-level" required min="0" placeholder="cm" class="w-full p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Kerawanan</label>
+                                    <select id="form-prone" class="w-full p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+                                        <option value="Sangat Rawan">Sangat Rawan</option>
+                                        <option value="Rawan">Rawan</option>
+                                        <option value="Sedang">Sedang</option>
+                                        <option value="Rendah">Rendah</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Latitude</label>
+                                    <input type="number" step="0.000001" id="form-lat" required placeholder="Contoh: -6.15" class="w-full p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Longitude</label>
+                                    <input type="number" step="0.000001" id="form-lng" required placeholder="Contoh: 106.73" class="w-full p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Tanggal Mulai Naik</label>
+                                <input type="date" id="form-date" required class="w-full p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition">
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Penyebab Banjir</label>
+                                <textarea id="form-cause" required rows="2" placeholder="Contoh: Hujan intensitas tinggi memicu luapan air tanggul." class="w-full p-2.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none transition"></textarea>
+                            </div>
+
+                            <!-- Buttons inside form -->
+                            <div class="flex gap-2 pt-2">
+                                <button type="button" onclick="resetForm()" class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition">
+                                    Batal / Reset
+                                </button>
+                                <button type="submit" class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md transition">
+                                    <span id="btn-submit-text">Simpan Data</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div id="form-instruction" class="mt-4 p-3 bg-blue-50 border border-blue-100 text-blue-800 text-[11px] rounded-xl leading-relaxed">
+                        <i class="fa-solid fa-circle-question mr-1"></i> <strong>Tips:</strong> Klik mode <span class="underline font-bold">"Atur Titik Baru"</span> di atas peta, kemudian klik peta Indonesia untuk langsung mengisi form koordinat otomatis.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer of Webpage -->
+    <footer class="bg-slate-900 text-slate-400 py-6 border-t border-slate-800 mt-12">
+        <div class="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-xs">
+            <div class="text-center md:text-left">
+                <p class="font-bold text-slate-200">&copy; 2026 PantauBanjir ID. Tanggap, Cepat, Akurat.</p>
+                <p class="mt-1">Dibuat sebagai portal simulasi darurat bencana banjir di Indonesia.</p>
+            </div>
+            <div class="flex gap-4">
+                <a href="#" class="hover:text-white transition">Kebijakan Privasi</a>
+                <span>&bull;</span>
+                <a href="#" class="hover:text-white transition">Pusat Bantuan</a>
+                <span>&bull;</span>
+                <a href="#" class="hover:text-white transition">Kontak Posko Darurat (112)</a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        // Default Dataset: Flood areas in Indonesia
+        let floodDataset = [
+            {
+                id: "f1",
+                name: "Kec. Dayeuhkolot, Kab. Bandung",
+                lat: -7.0006,
+                lng: 107.6212,
+                waterLevel: 155,
+                cause: "Luapan Sungai Citarum pasca hujan lebat berkepanjangan di area hulu.",
+                status: "Sangat Rawan",
+                date: "2026-05-28",
+                prone: "Sangat Rawan"
+            },
+            {
+                id: "f2",
+                name: "Kec. Kaligawe, Kota Semarang",
+                lat: -6.9620,
+                lng: 110.4500,
+                waterLevel: 90,
+                cause: "Tinggi air laut pasang (Rob) disertai tidak berjalannya salah satu sistem pompa pembuangan.",
+                status: "Rawan",
+                date: "2026-05-27",
+                prone: "Rawan"
+            },
+            {
+                id: "f3",
+                name: "Kec. Karanganyar, Kab. Demak",
+                lat: -6.8922,
+                lng: 110.6386,
+                waterLevel: 210,
+                cause: "Tanggul Sungai Wulan jebol akibat tekanan debit air kiriman yang sangat dahsyat.",
+                status: "Sangat Rawan",
+                date: "2026-05-25",
+                prone: "Sangat Rawan"
+            },
+            {
+                id: "f4",
+                name: "Cengkareng Barat, Jakarta Barat",
+                lat: -6.1554,
+                lng: 106.7358,
+                waterLevel: 120,
+                cause: "Drainase buruk yang tersumbat sampah dan luapan Kali Angke di sekitar pemukiman.",
+                status: "Rawan",
+                date: "2026-05-28",
+                prone: "Rawan"
+            },
+            {
+                id: "f5",
+                name: "Bengkong, Kota Samarinda",
+                lat: -0.4948,
+                lng: 117.1436,
+                waterLevel: 65,
+                cause: "Curah hujan yang ekstrim dan minimnya resapan air akibat pertumbuhan area beton perkotaan.",
+                status: "Sedang",
+                date: "2026-05-29",
+                prone: "Sedang"
+            },
+            {
+                id: "f6",
+                name: "Kec. Manggala, Kota Makassar",
+                lat: -5.1612,
+                lng: 119.4935,
+                waterLevel: 45,
+                cause: "Luapan air dari Waduk Tunggu Pampang yang melebihi kapasitas penampungan maksimal.",
+                status: "Sedang",
+                date: "2026-05-29",
+                prone: "Sedang"
+            }
+        ];
+
+        // App state variables
+        let selectedRegionId = null;
+        let map;
+        let markersGroup;
+        let isAddMode = false;
+        let activeFilter = 'SEMUA';
+
+        // Set standard map marker color based on vulnerability
+        function getVulnerabilityColor(proneStatus) {
+            switch(proneStatus.toUpperCase()) {
+                case 'SANGAT RAWAN': return '#ef4444'; // Red
+                case 'RAWAN': return '#f97316'; // Orange
+                case 'SEDANG': return '#eab308'; // Yellow
+                default: return '#3b82f6'; // Blue
+            }
+        }
+
+        // Setup Map Markers
+        function renderMarkers() {
+            if (!map || !markersGroup) return;
+
+            // Clear existing markers
+            markersGroup.clearLayers();
+
+            floodDataset.forEach(region => {
+                const color = getVulnerabilityColor(region.prone);
+                const isPulse = region.prone === 'Sangat Rawan' ? 'pulse-marker-critical' : (region.prone === 'Rawan' ? 'pulse-marker-warning' : '');
+
+                // Create custom SVG element as divIcon for modern sleek style
+                const customIcon = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `
+                        <div class="relative flex items-center justify-center">
+                            <div class="${isPulse} absolute" style="width: 14px; height: 14px; border-radius: 50%;"></div>
+                            <div style="background-color: ${color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.3); position: relative; z-index: 20;"></div>
+                        </div>
+                    `,
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7]
+                });
+
+                const marker = L.marker([region.lat, region.lng], { icon: customIcon });
+                
+                // Click marker triggers details viewing
+                marker.on('click', () => {
+                    selectRegion(region.id);
+                });
+
+                // Attach simple popup
+                marker.bindTooltip(`
+                    <div class="p-1 font-sans">
+                        <strong class="text-xs">${region.name}</strong>
+                        <div class="text-[10px] mt-0.5 text-blue-600 font-bold">Tinggi: ${region.waterLevel} cm</div>
+                    </div>
+                `, { direction: 'top', offset: [0, -5] });
+
+                markersGroup.addLayer(marker);
+            });
+        }
+
+        // Initialize Map
+        window.onload = function() {
+            // Set real-time date
+            const d = new Date();
+            const formatOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            document.getElementById('current-datetime').textContent = d.toLocaleDateString('id-ID', formatOptions);
+
+            // Centered on Indonesia
+            map = L.map('map', {
+                center: [-2.5489, 118.0149],
+                zoom: 5,
+                minZoom: 4,
+                maxZoom: 15
+            });
+
+            // Map Tiles using nice clean OSM template
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors'
+            }).addTo(map);
+
+            markersGroup = L.layerGroup().addTo(map);
+
+            // Event handler on clicking map
+            map.on('click', function(e) {
+                if (isAddMode) {
+                    // Populate coordinates inside the form
+                    document.getElementById('form-lat').value = e.latlng.lat.toFixed(6);
+                    document.getElementById('form-lng').value = e.latlng.lng.toFixed(6);
+                    showNotification("Koordinat berhasil diambil dari peta!");
+                    // Turn off add mode indicator after successful coordinate pick
+                    toggleAddMode();
+                }
+            });
+
+            // Set default date picker limit to today
+            document.getElementById('form-date').value = new Date().toISOString().split('T')[0];
+
+            // Render all UI components
+            updateUI();
+        };
+
+        // Select region to show deep details
+        function selectRegion(id) {
+            selectedRegionId = id;
+            const region = floodDataset.find(r => r.id === id);
+            
+            if (!region) return;
+
+            // Pan and zoom map directly to coordinates
+            map.setView([region.lat, region.lng], 12);
+
+            // Toggle element displays
+            document.getElementById('detail-empty-state').classList.add('hidden');
+            const detContent = document.getElementById('detail-content');
+            detContent.classList.remove('hidden');
+
+            // Set data properties
+            document.getElementById('det-region-name').textContent = region.name;
+            document.getElementById('det-coords').textContent = `${region.lat.toFixed(4)}, ${region.lng.toFixed(4)}`;
+            document.getElementById('det-water-level').textContent = `${region.waterLevel} cm`;
+            
+            // Adjust progress bar
+            const bar = document.getElementById('det-water-bar');
+            let percentage = (region.waterLevel / 250) * 100; // max scale benchmark is 250cm
+            if (percentage > 100) percentage = 100;
+            bar.style.width = `${percentage}%`;
+
+            // Adjust bar colors dynamically
+            if (region.waterLevel >= 200) {
+                bar.className = "bg-red-600 h-full rounded-full transition-all duration-1000 ease-out";
+            } else if (region.waterLevel >= 100) {
+                bar.className = "bg-amber-500 h-full rounded-full transition-all duration-1000 ease-out";
+            } else {
+                bar.className = "bg-blue-500 h-full rounded-full transition-all duration-1000 ease-out";
+            }
+
+            // Date
+            const dateObj = new Date(region.date);
+            const dateStr = dateObj.toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
+            document.getElementById('det-date').textContent = dateStr;
+
+            // Vulnerability Badge & Badge class
+            const badgeProne = document.getElementById('badge-prone-risk');
+            const proneTextContainer = document.getElementById('det-prone-text');
+            badgeProne.textContent = region.prone.toUpperCase();
+            
+            let badgeClass = "text-[10px] font-bold px-2.5 py-1 rounded-full ";
+            let textColorClass = "";
+            if (region.prone.toUpperCase() === 'SANGAT RAWAN') {
+                badgeClass += "bg-red-500 text-white animate-pulse";
+                textColorClass = "text-red-600";
+            } else if (region.prone.toUpperCase() === 'RAWAN') {
+                badgeClass += "bg-orange-500 text-white";
+                textColorClass = "text-orange-500";
+            } else if (region.prone.toUpperCase() === 'SEDANG') {
+                badgeClass += "bg-amber-400 text-slate-900";
+                textColorClass = "text-amber-500";
+            } else {
+                badgeClass += "bg-emerald-500 text-white";
+                textColorClass = "text-emerald-500";
+            }
+            badgeProne.className = badgeClass;
+            proneTextContainer.className = `text-sm font-bold mt-1 flex items-center gap-1 ${textColorClass}`;
+            proneTextContainer.querySelector('span').textContent = region.prone;
+
+            // Cause and custom tailored actions
+            document.getElementById('det-cause').textContent = region.cause;
+
+            // Generate recommendation based on risk
+            let rec = "";
+            if (region.prone.toUpperCase() === 'SANGAT RAWAN') {
+                rec = "Siaga Level Tinggi. Matikan seluruh saluran listrik utama, evakuasi warga lanjut usia dan anak-anak ke balai desa yang lebih tinggi, pasang pembendung pasir darurat, dan terus dengarkan pengeras suara posko.";
+            } else if (region.prone.toUpperCase() === 'RAWAN') {
+                rec = "Waspada Level Medium. Naikkan barang-barang penting ke lantai dua, siapkan obat-obatan dasar dan makanan instan, pantau perkembangan cuaca lokal, bersihkan jalur pembuangan air kecil di sekitar pekarangan.";
+            } else {
+                rec = "Kewaspadaan Rendah. Lakukan kerja bakti pembersihan selokan berkala, hindari membuang sampah sembarangan di bantaran parit, dan sediakan senter darurat di rumah.";
+            }
+            document.getElementById('det-recommendation').textContent = rec;
+
+            // Highlight selected row in table
+            highlightTableRow(id);
+        }
+
+        // Manage active row highlighting
+        function highlightTableRow(id) {
+            const rows = document.querySelectorAll('#regions-table-body tr');
+            rows.forEach(row => {
+                if (row.getAttribute('data-id') === id) {
+                    row.className = "bg-blue-50 border-l-4 border-blue-600 cursor-pointer transition font-medium text-blue-900";
+                } else {
+                    row.className = "hover:bg-slate-50 cursor-pointer transition text-slate-700";
+                }
+            });
+        }
+
+        // Re-renders and updates statistics and the interactive table listing
+        function updateUI() {
+            // Stats Calculations
+            const totalActive = floodDataset.length;
+            const maxWater = floodDataset.reduce((max, r) => r.waterLevel > max ? r.waterLevel : max, 0);
+            const criticalCount = floodDataset.filter(r => r.prone.toUpperCase() === 'SANGAT RAWAN').length;
+
+            document.getElementById('stat-active-floods').textContent = totalActive;
+            document.getElementById('stat-max-water').innerHTML = `${maxWater} <span class="text-sm font-normal text-slate-500">cm</span>`;
+            document.getElementById('stat-critical-zones').textContent = criticalCount;
+
+            // Filter data and populate table
+            const tableBody = document.getElementById('regions-table-body');
+            tableBody.innerHTML = '';
+
+            let filteredList = floodDataset;
+            if (activeFilter !== 'SEMUA') {
+                filteredList = floodDataset.filter(r => r.prone.toUpperCase() === activeFilter.toUpperCase());
+            }
+
+            if (filteredList.length === 0) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="py-12 text-center text-slate-400">
+                            <i class="fa-solid fa-folder-open text-3xl mb-2 block"></i>
+                            Tidak ada data wilayah dengan tingkat kerawanan ini.
+                        </td>
+                    </tr>
+                `;
+            } else {
+                filteredList.forEach(region => {
+                    const row = document.createElement('tr');
+                    row.setAttribute('data-id', region.id);
+                    row.className = selectedRegionId === region.id 
+                        ? "bg-blue-50 border-l-4 border-blue-600 cursor-pointer transition font-medium text-blue-900" 
+                        : "hover:bg-slate-50 cursor-pointer transition text-slate-700";
+                    
+                    row.onclick = () => selectRegion(region.id);
+
+                    // Badge Styling for Prone level inside table
+                    let proneBadge = '';
+                    if (region.prone.toUpperCase() === 'SANGAT RAWAN') {
+                        proneBadge = `<span class="px-2 py-1 bg-red-100 text-red-700 font-bold rounded-md">Sangat Rawan</span>`;
+                    } else if (region.prone.toUpperCase() === 'RAWAN') {
+                        proneBadge = `<span class="px-2 py-1 bg-orange-100 text-orange-700 font-bold rounded-md">Rawan</span>`;
+                    } else if (region.prone.toUpperCase() === 'SEDANG') {
+                        proneBadge = `<span class="px-2 py-1 bg-amber-100 text-amber-700 font-bold rounded-md">Sedang</span>`;
+                    } else {
+                        proneBadge = `<span class="px-2 py-1 bg-emerald-100 text-emerald-700 font-bold rounded-md">Rendah</span>`;
+                    }
+
+                    // Water level warning styling
+                    let wlClass = "font-extrabold ";
+                    if (region.waterLevel >= 200) wlClass += "text-red-600";
+                    else if (region.waterLevel >= 100) wlClass += "text-orange-600";
+                    else wlClass += "text-blue-600";
+
+                    // Truncate long descriptions
+                    const truncatedCause = region.cause.length > 55 ? region.cause.substring(0, 52) + '...' : region.cause;
+
+                    // Parse readable date
+                    const formattedDate = new Date(region.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+
+                    row.innerHTML = `
+                        <td class="py-3.5 px-4 font-bold text-slate-800">${region.name}</td>
+                        <td class="py-3.5 px-4 ${wlClass}">${region.waterLevel} cm</td>
+                        <td class="py-3.5 px-4 text-slate-500 whitespace-nowrap">${formattedDate}</td>
+                        <td class="py-3.5 px-4 text-slate-500 max-w-xs truncate" title="${region.cause}">${truncatedCause}</td>
+                        <td class="py-3.5 px-4">${proneBadge}</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+            }
+
+            // Render/Refresh markers on the map
+            renderMarkers();
+        }
+
+        // Toggle interactive coordinate grabbing mode on Map click
+        function toggleAddMode() {
+            isAddMode = !isAddMode;
+            const btn = document.getElementById('btn-add-mode');
+            const txt = document.getElementById('add-mode-text');
+
+            if (isAddMode) {
+                btn.className = "w-full sm:w-auto px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition flex items-center justify-center gap-1.5 shadow-sm animate-pulse";
+                txt.textContent = "Batal Pilih Koordinat";
+                document.getElementById('map').style.cursor = 'crosshair';
+                showNotification("Silahkan KLIK area mana saja di peta Indonesia untuk mendapatkan koordinat otomatis.");
+            } else {
+                btn.className = "w-full sm:w-auto px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-1.5 shadow-sm";
+                txt.textContent = "Atur Titik Baru";
+                document.getElementById('map').style.cursor = '';
+            }
+        }
+
+        // Set filters for the main table data
+        function setFilter(filterType) {
+            activeFilter = filterType;
+            
+            // Adjust active CSS states of buttons
+            const buttons = document.querySelectorAll('.filter-btn');
+            buttons.forEach(btn => {
+                if (btn.textContent.toUpperCase() === filterType.toUpperCase()) {
+                    btn.className = "filter-btn active-filter px-3 py-1.5 bg-blue-100 text-blue-700 font-semibold rounded-lg hover:bg-blue-200 transition";
+                } else {
+                    btn.className = "filter-btn px-3 py-1.5 bg-slate-100 text-slate-600 font-semibold rounded-lg hover:bg-slate-200 transition";
+                }
+            });
+
+            updateUI();
+        }
+
+        // Instant search filtering function
+        function filterTable() {
+            const query = document.getElementById('search-input').value.toLowerCase();
+            const rows = document.querySelectorAll('#regions-table-body tr');
+
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                if (text.includes(query)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+
+        // Push selected row's data into form fields for simple editing
+        function editSelectedInForm() {
+            if (!selectedRegionId) return;
+            const region = floodDataset.find(r => r.id === selectedRegionId);
+            if (!region) return;
+
+            // Load variables inside inputs
+            document.getElementById('form-region-id').value = region.id;
+            document.getElementById('form-region-name').value = region.name;
+            document.getElementById('form-water-level').value = region.waterLevel;
+            document.getElementById('form-prone').value = region.prone;
+            document.getElementById('form-lat').value = region.lat;
+            document.getElementById('form-lng').value = region.lng;
+            document.getElementById('form-date').value = region.date;
+            document.getElementById('form-cause').value = region.cause;
+
+            document.getElementById('btn-submit-text').textContent = "Simpan Perubahan";
+            
+            // Smooth scroll to form element for mobile responsiveness
+            document.getElementById('flood-form').scrollIntoView({ behavior: 'smooth' });
+            showNotification(`Data '${region.name}' dimuat ke dalam form pengeditan.`);
+        }
+
+        // Form reset & state cleanup
+        function resetForm() {
+            document.getElementById('flood-form').reset();
+            document.getElementById('form-region-id').value = "";
+            document.getElementById('btn-submit-text').textContent = "Simpan Data";
+            document.getElementById('form-date').value = new Date().toISOString().split('T')[0];
+        }
+
+        // Handling Form Save (Insert & Update Logic)
+        function handleFormSubmit(event) {
+            event.preventDefault();
+
+            const formId = document.getElementById('form-region-id').value;
+            const name = document.getElementById('form-region-name').value.trim();
+            const waterLevel = parseInt(document.getElementById('form-water-level').value);
+            const prone = document.getElementById('form-prone').value;
+            const lat = parseFloat(document.getElementById('form-lat').value);
+            const lng = parseFloat(document.getElementById('form-lng').value);
+            const date = document.getElementById('form-date').value;
+            const cause = document.getElementById('form-cause').value.trim();
+
+            if (formId) {
+                // UPDATE Existing
+                const index = floodDataset.findIndex(r => r.id === formId);
+                if (index !== -1) {
+                    floodDataset[index] = { id: formId, name, waterLevel, prone, lat, lng, date, cause };
+                    showNotification(`Berhasil memperbarui data wilayah ${name}!`);
+                }
+            } else {
+                // INSERT New
+                const newId = 'f' + (Date.now());
+                const newRegion = { id: newId, name, waterLevel, prone, lat, lng, date, cause };
+                floodDataset.push(newRegion);
+                showNotification(`Berhasil menambahkan wilayah terdampak baru: ${name}!`);
+                // Auto focus on the newly inserted item
+                selectedRegionId = newId;
+            }
+
+            // Reset and update everything
+            resetForm();
+            updateUI();
+            
+            if (selectedRegionId) {
+                selectRegion(selectedRegionId);
+            }
+        }
+
+        // Notification actions
+        function showNotification(message) {
+            const notif = document.getElementById('app-notification');
+            const msg = document.getElementById('notification-message');
+            msg.textContent = message;
+
+            notif.classList.remove('hidden');
+            setTimeout(() => {
+                notif.classList.remove('scale-95', 'opacity-0');
+                notif.classList.add('scale-100', 'opacity-100');
+            }, 10);
+
+            // Auto-dismiss after 5 seconds
+            setTimeout(() => {
+                closeNotification();
+            }, 5000);
+        }
+
+        function closeNotification() {
+            const notif = document.getElementById('app-notification');
+            notif.classList.add('scale-95', 'opacity-0');
+            notif.classList.remove('scale-100', 'opacity-100');
+            setTimeout(() => {
+                notif.classList.add('hidden');
+            }, 300);
+        }
+
+        // Custom simulated clipboard sharing functionality (safe from frame restriction errors)
+        function shareSelectedInfo() {
+            if (!selectedRegionId) return;
+            const region = floodDataset.find(r => r.id === selectedRegionId);
+            if (!region) return;
+
+            const text = `⚠️ [PANTAU BANJIR ID] - INFO STATUS DARURAT\n\n📍 Wilayah: ${region.name}\n📈 Tinggi Air: ${region.waterLevel} cm (${region.prone.toUpperCase()})\n📅 Mulai Naik: ${region.date}\n❓ Penyebab: ${region.cause}\n\nDipantau melalui Portal PantauBanjir ID secara Real-Time. Tetap Waspada!`;
+
+            // Textarea workaround to prevent iframe security restriction for navigator.clipboard
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed'; // Avoid scrolling to bottom
+            document.body.appendChild(textarea);
+            textarea.select();
+            
+            try {
+                document.execCommand('copy');
+                showNotification(`Informasi untuk ${region.name} berhasil disalin ke clipboard! Siap dibagikan.`);
+            } catch (err) {
+                showNotification("Gagal menyalin teks secara otomatis. Silakan coba kembali.");
+            }
+            
+            document.body.removeChild(textarea);
+        }
+    </script>
+</body>
+</html>
